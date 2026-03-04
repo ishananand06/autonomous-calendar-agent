@@ -48,17 +48,48 @@ def get_upcoming_events(service, time_min=None, time_max=None):
     """
     Retrieves events from the user's primary calendar within a specific timeframe.
     This is the 'Context Tool' the LLM agent will use to check cognitive load.
+    Defaults to the next 7 days if no range is provided.
     """
-    # TODO: Use Copilot to implement the service.events().list() API call
-    pass
+    if time_min is None:
+        time_min = datetime.datetime.utcnow().isoformat() + 'Z'
+    if time_max is None:
+        time_max = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).isoformat() + 'Z'
 
-def add_calendar_event(service, summary, start_time, end_time):
+    events_result = service.events().list(
+        calendarId='primary',
+        timeMin=time_min,
+        timeMax=time_max,
+        singleEvents=True,
+        orderBy='startTime'
+    ).execute()
+
+    events = events_result.get('items', [])
+    print(f"Retrieved {len(events)} events.")
+    return events
+
+def add_calendar_event(service, summary, start_time, end_time, timezone='UTC'):
     """
     Adds a new event to the calendar.
     This is the 'Execution Tool' the LLM agent will use after approving a task.
+
+    Args:
+        service: Authenticated Google Calendar service object.
+        summary: Title of the event.
+        start_time: ISO 8601 start datetime string (e.g. '2026-03-05T09:00:00').
+        end_time: ISO 8601 end datetime string.
+        timezone: IANA timezone name (default 'UTC').
     """
-    # TODO: Use Copilot to implement the service.events().insert() API call
-    pass
+    event_body = {
+        'summary': summary,
+        'start': {'dateTime': start_time, 'timeZone': timezone},
+        'end':   {'dateTime': end_time,   'timeZone': timezone},
+    }
+    created_event = service.events().insert(
+        calendarId='primary',
+        body=event_body
+    ).execute()
+    print(f"Event created: {created_event.get('htmlLink')}")
+    return created_event
 
 if __name__ == "__main__":
     # A quick test to ensure authentication works when you run this file directly
