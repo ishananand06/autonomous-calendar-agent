@@ -27,3 +27,35 @@ An opinionated, serverless scheduling assistant accessed via WhatsApp. Unlike st
 5. Install dependencies: `pip install -r requirements.txt`
 6. Copy `.env.example` to `.env` and add your API credentials.
 7. Run the local server: `uvicorn main:app --reload`
+
+## Setting up Google Calendar API Credentials
+To allow the AI to read and modify your schedule, you must connect it to your own Google Account. Google requires you to generate a secure `credentials.json` file.
+
+**Step 1: Create a Google Cloud Project**
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Click the project dropdown (top left) and select **New Project**.
+3. Name it `Calendar-Agent` (or similar) and click **Create**.
+
+**Step 2: Enable the Calendar API**
+1. In your new project, navigate to **APIs & Services > Library** using the left sidebar.
+2. Search for **Google Calendar API**.
+3. Click on it and hit **Enable**.
+
+**Step 3: Configure the OAuth Consent Screen**
+1. Go to **APIs & Services > OAuth consent screen**.
+2. Select **External** and click **Create**.
+3. Fill in the required fields (App name, User support email, and Developer contact information).
+4. Click **Save and Continue** through the "Scopes" screen.
+5. On the **Test users** screen, click **Add Users** and enter the exact Gmail address you use for your calendar. *(Crucial: If you skip this, Google will block your login attempts).*
+6. Click **Save and Continue**.
+
+**Step 4: Download Your Credentials**
+1. Go to **APIs & Services > Credentials**.
+2. Click **+ CREATE CREDENTIALS** at the top and select **OAuth client ID**.
+3. Set the **Application type** to **Desktop app**.
+4. Name it `Python Calendar Script` and click **Create**.
+5. Click **Download JSON** on the popup that appears.
+6. Move the downloaded file into the root folder of this repository and rename it exactly to `credentials.json`.
+
+**SECURITY WARNING**
+Never share your `credentials.json` or `token.json` files, and **never commit them to version control**. Ensure your `.gitignore` file includes these filenames before running `git push`.
