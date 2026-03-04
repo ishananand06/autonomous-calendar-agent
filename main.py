@@ -1,6 +1,7 @@
 import os
 import httpx
-from fastapi import FastAPI, Request, HTTPException
+from collections import deque
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
 from agent import process_whatsapp_message
 
@@ -19,6 +20,20 @@ WHATSAPP_API_URL        = (
 # Per-user conversation history keyed by the sender's phone number.
 # In production this should be a persistent store (Redis, DB, etc.).
 chat_sessions: dict[str, list] = {}
+
+# Deduplication guard — WhatsApp retries webhooks if it doesn't get a fast 200.
+# We track the last 500 message IDs (set for O(1) lookup, deque for eviction).
+_seen_ids: set[str] = set()
+_seen_ids_queue: deque[str] = deque(maxlen=500)
+
+def _is_duplicate(msg_id: str) -> bool:
+    if msg_id in _seen_ids:
+        return True
+    if len(_seen_ids_queue) == _seen_ids_queue.maxlen:
+        _seen_ids.discard(_seen_ids_queue[0])
+    _seen_ids.add(msg_id)
+    _seen_ids_queue.append(msg_id)
+    return False
 
 
 @app.get("/")
@@ -46,13 +61,24 @@ async def verify_webhook(request: Request):
 
     raise HTTPException(status_code=400, detail="Missing parameters")
 
+async def handle_message_background(sender: str, user_text: str, history: list):
+    try:
+        # 1. Get the AI's reply (this takes a few seconds)
+        import asyncio
+        # We run the synchronous Gemini code in a thread so it doesn't block FastAPI
+        reply_text, updated_history = await asyncio.to_thread(process_whatsapp_message, user_text, history)
+        
+        # 2. Save history
+        chat_sessions[sender] = updated_history
+        
+        # 3. Send the WhatsApp reply
+        await _send_whatsapp_message(sender, reply_text)
+    except Exception as e:
+        print(f"Error in background task: {e}")
+
 
 @app.post("/webhook")
-async def receive_message(request: Request):
-    """
-    Receives WhatsApp messages, routes them through the Gemini agent, and
-    sends the reply back via the WhatsApp Cloud API.
-    """
+async def receive_message(request: Request, background_tasks: BackgroundTasks): # Add it here
     body = await request.json()
     print(f"Incoming Webhook Payload: {body}")
 
@@ -63,28 +89,27 @@ async def receive_message(request: Request):
         messages = value.get("messages", [])
 
         if not messages:
-            # Could be a status update (delivered/read receipt) — safe to ignore
             return {"status": "no_message"}
 
         message = messages[0]
         if message.get("type") != "text":
-            # Non-text messages (images, voice notes, etc.) are not yet supported
             return {"status": "non_text_ignored"}
+
+        # Drop retried/duplicate deliveries
+        if _is_duplicate(message.get("id", "")):
+            return {"status": "duplicate_ignored"}
 
         sender    = message["from"]
         user_text = message["text"]["body"]
-
-        # Retrieve (or create) the conversation history for this user
         history = chat_sessions.get(sender, [])
-        reply_text, updated_history = process_whatsapp_message(user_text, history)
-        chat_sessions[sender] = updated_history
 
-        await _send_whatsapp_message(sender, reply_text)
+        # Add the heavy lifting to the background task queue
+        background_tasks.add_task(handle_message_background, sender, user_text, history)
 
     except Exception as e:
-        # Always return 200 so WhatsApp doesn't retry endlessly
-        print(f"Error processing message: {e}")
+        print(f"Error parsing webhook: {e}")
 
+    # Return 200 OK instantly to keep WhatsApp happy!
     return {"status": "success"}
 
 

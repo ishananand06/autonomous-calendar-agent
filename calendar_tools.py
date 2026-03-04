@@ -50,10 +50,11 @@ def get_upcoming_events(service, time_min=None, time_max=None):
     This is the 'Context Tool' the LLM agent will use to check cognitive load.
     Defaults to the next 7 days if no range is provided.
     """
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     if time_min is None:
-        time_min = datetime.datetime.utcnow().isoformat() + 'Z'
+        time_min = now.isoformat() + 'Z'
     if time_max is None:
-        time_max = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).isoformat() + 'Z'
+        time_max = (now + datetime.timedelta(days=7)).isoformat() + 'Z'
 
     events_result = service.events().list(
         calendarId='primary',

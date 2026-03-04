@@ -1,7 +1,8 @@
 {
-    "daily_cognitive_limit_hours": 8,
-    "habits": [
-        {"name": "LeetCode", "duration_minutes": 45, "frequency": "daily"}
-    ],
-    "projects": ["Project A", "Project B"]
+  "daily_cognitive_limit_hours": 8,
+  "timezone": "Asia/Kolkata",
+  "habits": [
+    { "name": "LeetCode", "duration_minutes": 45, "frequency": "daily" }
+  ],
+  "projects": ["Project A", "Project B"]
 }
