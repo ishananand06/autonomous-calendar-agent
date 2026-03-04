@@ -7,6 +7,7 @@ An opinionated, serverless scheduling assistant accessed via WhatsApp. Unlike st
 * **State Management:** Real-time bi-directional sync with Google Calendar API.
 * **Cognitive Load Protection:** Enforces a maximum daily limit of deep-work hours.
 * **Habit Anchoring:** Automatically protects time for non-negotiable daily routines.
+* **Dynamic Preferences:** Habits and cognitive limits are not hardcoded. Users can update their daily "budget" or habit durations in real-time via natural language or by modifying `user_config.json`.
 
 ## Example Interaction
 **User:** "Add 3 hours of debugging the people tracking model tomorrow afternoon."
@@ -25,8 +26,9 @@ An opinionated, serverless scheduling assistant accessed via WhatsApp. Unlike st
    - Mac/Linux: `source .venv/bin/activate`
    - Windows: `.venv\Scripts\activate`
 5. Install dependencies: `pip install -r requirements.txt`
-6. Copy `.env.example` to `.env` and add your API credentials.
-7. Run the local server: `uvicorn main:app --reload`
+6. Initialize your profile: `python setup.py`
+7. Copy `.env.example` to `.env` and add your API credentials.
+8. Run the local server: `uvicorn main:app --reload`
 
 ## Setting up Google Calendar API Credentials
 To allow the AI to read and modify your schedule, you must connect it to your own Google Account. Google requires you to generate a secure `credentials.json` file.

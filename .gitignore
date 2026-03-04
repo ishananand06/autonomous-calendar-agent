@@ -209,3 +209,4 @@ __marimo__/
 # Google Credentials
 credentials.json
 token.json
+user_config.json

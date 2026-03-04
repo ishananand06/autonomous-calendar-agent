@@ -1,0 +1,7 @@
+{
+    "daily_cognitive_limit_hours": 8,
+    "habits": [
+        {"name": "LeetCode", "duration_minutes": 45, "frequency": "daily"}
+    ],
+    "projects": ["Project A", "Project B"]
+}
