@@ -18,7 +18,12 @@ An opinionated, serverless scheduling assistant accessed via WhatsApp. Unlike st
 3. `calendar_tools.py`: Google Calendar API authentication, event retrieval, and event insertion.
 
 ## Local Setup
-1. Clone the repository.
-2. Install dependencies: `pip install -r requirements.txt`
-3. Copy `.env.example` to `.env` and add your Gemini and Google Cloud credentials.
-4. Run the local server: `uvicorn main:app --reload`
+1. Clone the repository: `git clone https://github.com/ishananand06/autonomous-calendar-agent.git`
+2. Navigate into the directory: `cd autonomous-calendar-agent`
+3. Create a virtual environment: `python -m venv .venv`
+4. Activate the virtual environment:
+   - Mac/Linux: `source .venv/bin/activate`
+   - Windows: `.venv\Scripts\activate`
+5. Install dependencies: `pip install -r requirements.txt`
+6. Copy `.env.example` to `.env` and add your API credentials.
+7. Run the local server: `uvicorn main:app --reload`
