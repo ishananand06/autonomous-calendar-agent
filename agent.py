@@ -5,6 +5,7 @@ import zoneinfo
 import google.generativeai as genai
 from dotenv import load_dotenv
 from calendar_tools import authenticate_google_calendar, get_upcoming_events, add_calendar_event
+from google.api_core.exceptions import ResourceExhausted, TooManyRequests
 
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
@@ -31,22 +32,79 @@ def save_user_preferences(prefs):
         json.dump(prefs, f, indent=4)
 
 def get_system_prompt(prefs):
-    """Generates a prompt based on the CURRENT state of preferences."""
     today = datetime.date.today().isoformat()
     return f"""
-    You are an autonomous scheduling assistant. Today's date is {today}.
-    Current Rules:
-    1. Max Cognitive Load: {prefs['daily_cognitive_limit_hours']} hours/day.
-    2. Active Habits: {json.dumps(prefs['habits'])}
-    3. Active Projects: {prefs['projects']}
-    4. User Timezone: {prefs.get('timezone', 'UTC')} — all scheduled event times are in this timezone.
+    You are an autonomous constraint-satisfaction scheduling assistant. Today's date is {today}.
 
-    Logic:
-    - ALWAYS call check_calendar for the relevant day before making any scheduling decision.
-    - Sum up event durations for the target day. If adding the requested task exceeds the
-      cognitive limit, refuse and explain clearly — unless the user explicitly overrides.
-    - If the user asks to change a habit or the daily limit, call update_preferences.
-    - If scheduling is approved, call create_event to actually add it to the calendar.
+    ═══════════════════════════════════════════════
+    CURRENT STATE
+    ═══════════════════════════════════════════════
+    1. Max Daily Cognitive Load : {prefs.get('daily_cognitive_limit_hours', 8)} hours/day
+    2. User Timezone        : {prefs.get('timezone', 'UTC')}
+    3. Active Habits            : {json.dumps(prefs.get('habits', []))}
+    4. Active Projects          : {json.dumps(prefs.get('projects', []))}
+    5. Active Deadlines         : {json.dumps(prefs.get('active_deadlines', []))}
+
+    ═══════════════════════════════════════════════
+    COGNITIVE MATH (apply strictly)
+    ═══════════════════════════════════════════════
+    - Meals, exercise, travel       → 0 cognitive hours consumed
+    - Classes, deep work, studying  → consumes cognitive hours
+    - Track remaining bandwidth = daily_limit − scheduled cognitive hours
+
+    ═══════════════════════════════════════════════
+    CALENDAR CLASSIFICATION
+    ═══════════════════════════════════════════════
+    Classify every calendar event as HARD or SOFT before scheduling decisions:
+
+    HARD events (cannot be moved):
+      → Classes (APL105, COL106, etc.), meetings with others, flights, appointments
+      → If asked to schedule over one: "This time is blocked for a hard commitment and cannot be changed."
+
+    SOFT events (flexible, can be traded):
+      → Solo study sessions, reading a paper, coding practice, flexible project blocks
+      → If cognitive bandwidth is exhausted but a high-priority task needs scheduling,
+        scan for SOFT events and propose a trade-off:
+        "You have 2 hrs blocked for reading a paper. Since that's flexible, should I
+        replace it with this urgent task?"
+
+    ═══════════════════════════════════════════════
+    STATE MANAGEMENT (tool: update_preferences)
+    ═══════════════════════════════════════════════
+    You have full CRUD access to the user's config via update_preferences.
+
+    DIRECT UPDATES (act immediately, no clarification needed):
+      • Cognitive limit change → "change my limit to 10 hours"
+        ↳ Call update_preferences with key 'daily_cognitive_limit_hours'
+      • Urgency/context update → "The Among Us project is getting super urgent"
+        ↳ Call update_preferences with key 'project_context:<name>'
+      • New deadline → "Prep for mentor meeting next week, takes 4 hours"
+        ↳ Call update_preferences with key 'deadline_add'
+           Required fields: task, due_date (YYYY-MM-DD format), hours_needed
+      • Partial completion → Call update_preferences with key 'deadline_update_hours:<task>'
+
+    ASK FIRST, THEN UPDATE (new projects or habits):
+      • Do NOT add blindly. Ask:
+        - "What is the priority or context for this?"
+        - "How long does it usually take per session?"
+      • Only call update_preferences after the user responds.
+
+    ═══════════════════════════════════════════════
+    PROACTIVE SCHEDULING
+    ═══════════════════════════════════════════════
+    On every calendar check:
+    1. Scan Active Deadlines for approaching due dates (≤ 3 days away).
+    2. If the user has open cognitive bandwidth today AND a deadline is close,
+       proactively suggest scheduling a work block:
+       "You have 3 hrs free today and [Task X] is due in 2 days (needs Y hrs).
+        Want me to block time this afternoon to chip away at it?"
+    3. Distribute hours_needed across available days before the due_date when helpful.
+
+    ═══════════════════════════════════════════════
+    CONFIRMATION RULE (non-negotiable)
+    ═══════════════════════════════════════════════
+    ALWAYS get explicit user confirmation before calling create_event,
+    especially when modifying, overriding, or trading existing schedule blocks.
     """
 
 # ── Tool functions exposed to Gemini ─────────────────────────────────────────
@@ -100,54 +158,76 @@ def create_event(summary: str, start_datetime: str, end_datetime: str) -> dict:
 def update_preferences(key: str, value) -> dict:
     """
     Persists a change to the user's scheduling preferences.
-
-    Args:
-        key: The preference to update. Supported values:
-             'daily_cognitive_limit_hours'     — set the daily hour cap (value: int)
-             'timezone'                         — update the IANA timezone (value: str)
-             'habit_add'                        — add a new habit (value: dict with
-                                                  name, duration_minutes, frequency)
-             'habit_remove:<name>'              — remove a habit by name
-             'habit_duration:<name>'            — update a habit's duration in minutes
-             'habit_frequency:<name>'           — update a habit's frequency string
-        value: The new value corresponding to the key.
+    
+    Supported keys:
+    'daily_cognitive_limit_hours', 'timezone'
+    'habit_add' (value: dict with name, duration_minutes, frequency, context)
+    'habit_remove:<name>', 'habit_context:<name>' (updates context string)
+    'project_add' (value: dict with name, context)
+    'project_remove:<name>'
+    'project_context:<name>' (updates the context string)
+    'deadline_add' (value: dict with task, due_date YYYY-MM-DD, hours_needed)
+    'deadline_remove:<task>'
+    'deadline_update_hours:<task>' (value: new float hours remaining)
     """
     prefs = load_user_preferences()
 
     if key == "daily_cognitive_limit_hours":
         prefs["daily_cognitive_limit_hours"] = int(value)
-
     elif key == "timezone":
         prefs["timezone"] = str(value)
-
+        
+    # --- Habit Management ---
     elif key == "habit_add":
         prefs.setdefault("habits", []).append({
-            "name":             value["name"],
+            "name": value["name"],
             "duration_minutes": int(value["duration_minutes"]),
-            "frequency":        value.get("frequency", "daily"),
+            "frequency": value.get("frequency", "daily"),
+            "context": value.get("context", "Standard habit.")
         })
-
     elif key.startswith("habit_remove:"):
-        habit_name = key.split(":", 1)[1]
-        prefs["habits"] = [
-            h for h in prefs.get("habits", [])
-            if h["name"].lower() != habit_name.lower()
-        ]
-
-    elif key.startswith("habit_duration:"):
-        habit_name = key.split(":", 1)[1]
-        for habit in prefs.get("habits", []):
-            if habit["name"].lower() == habit_name.lower():
-                habit["duration_minutes"] = int(value)
+        name = key.split(":", 1)[1]
+        prefs["habits"] = [h for h in prefs.get("habits", []) if h["name"].lower() != name.lower()]
+    elif key.startswith("habit_context:"):
+        name = key.split(":", 1)[1]
+        for h in prefs.get("habits", []):
+            if h["name"].lower() == name.lower():
+                h["context"] = str(value)
                 break
 
-    elif key.startswith("habit_frequency:"):
-        habit_name = key.split(":", 1)[1]
-        for habit in prefs.get("habits", []):
-            if habit["name"].lower() == habit_name.lower():
-                habit["frequency"] = str(value)
+    # --- Project Management ---
+    elif key == "project_add":
+        prefs.setdefault("projects", []).append({
+            "name": value["name"],
+            "context": value.get("context", "New project.")
+        })
+    elif key.startswith("project_remove:"):
+        name = key.split(":", 1)[1]
+        prefs["projects"] = [p for p in prefs.get("projects", []) if p["name"].lower() != name.lower()]
+    elif key.startswith("project_context:"):
+        name = key.split(":", 1)[1]
+        for p in prefs.get("projects", []):
+            if p["name"].lower() == name.lower():
+                p["context"] = str(value)
                 break
-
+    
+    # --- Deadline Management ---
+    elif key == "deadline_add":
+        prefs.setdefault("active_deadlines", []).append({
+            "task": value["task"],
+            "hours_needed": float(value["hours_needed"]),
+            "due_date": value["due_date"] # Must be YYYY-MM-DD
+        })
+    elif key.startswith("deadline_remove:"):
+        task_name = key.split(":", 1)[1]
+        prefs["active_deadlines"] = [d for d in prefs.get("active_deadlines", []) if d["task"].lower() != task_name.lower()]
+    elif key.startswith("deadline_update_hours:"):
+        task_name = key.split(":", 1)[1]
+        for d in prefs.get("active_deadlines", []):
+            if d["task"].lower() == task_name.lower():
+                d["hours_needed"] = float(value)
+                break
+    
     else:
         return {"error": f"Unknown preference key: '{key}'"}
 
@@ -156,30 +236,73 @@ def update_preferences(key: str, value) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+def cleanup_expired_deadlines():
+    """Silently removes deadlines from user_config.json that are in the past."""
+    prefs = load_user_preferences()
+    today = datetime.date.today().isoformat()
+    
+    deadlines = prefs.get("active_deadlines", [])
+    if not deadlines:
+        return prefs
+
+    # Keep only deadlines where the due_date is today or in the future
+    valid_deadlines = [d for d in deadlines if d.get("due_date", "") >= today]
+    
+    # Only save to disk if something was actually deleted to save I/O operations
+    if len(valid_deadlines) < len(deadlines):
+        prefs["active_deadlines"] = valid_deadlines
+        save_user_preferences(prefs)
+        
+    return prefs
+
+FALLBACK_MODELS = [
+    'gemini-3-flash-preview',          # Primary: Best reasoning for complex logic
+    'gemini-3.1-flash-lite-preview',   # Fallback 1: Fast, scalable, adjustable thinking
+    'gemini-2.5-flash'         # Fallback 2: The old reliable workhorse
+]
+
 def process_whatsapp_message(user_message: str, chat_history=None):
     """
     Routes a WhatsApp message through Gemini with live tool calling.
-    Preferences are reloaded on every call so in-session changes take effect immediately.
+    Includes a Model Fallback cascade if the primary model hits its daily quota.
     """
-    prefs = load_user_preferences()  # always fresh
-
-    # Rebuild the model so the system instruction reflects the current preferences
-    model = genai.GenerativeModel(
-        model_name='gemini-3-flash-preview',
-        system_instruction=get_system_prompt(prefs),
-        tools=[check_calendar, create_event, update_preferences],
-    )
-
-    # Cap history to avoid hitting Gemini's context window limit
+    prefs = cleanup_expired_deadlines()
+    
     MAX_HISTORY = 20
     trimmed_history = (chat_history or [])[-MAX_HISTORY:]
 
-    chat = model.start_chat(
-        history=trimmed_history,
-        enable_automatic_function_calling=True,
-    )
-    response = chat.send_message(user_message)
-    return response.text, chat.history
+    # --- MODEL FALLBACK CASCADE ---
+    for model_name in FALLBACK_MODELS:
+        try:
+            print(f"🧠 Attempting inference with {model_name}...")
+            
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction=get_system_prompt(prefs),
+                tools=[check_calendar, create_event, update_preferences],
+            )
+            
+            chat = model.start_chat(
+                history=trimmed_history,
+                enable_automatic_function_calling=True,
+            )
+            
+            response = chat.send_message(user_message)
+            return response.text, chat.history
+            
+        except (ResourceExhausted, TooManyRequests):
+            # If this specific model is out of daily quota, loop to the next one
+            print(f"⚠️ {model_name} hit its rate limit (429). Cascading to next model...")
+            continue 
+            
+        except Exception as e:
+            # If it is a real crash (like a bad API key or server outage), stop immediately
+            print(f"❌ Unexpected API error with {model_name}: {e}")
+            return "I encountered an unexpected internal error. Please check the server logs.", chat_history
+
+    # If the loop finishes, you have literally exhausted every model's free tier
+    print("❌ All models in the fallback cascade are rate limited.")
+    return "I am completely out of cognitive bandwidth for the day across all my models! Please try again later.", chat_history
 
 
 if __name__ == "__main__":

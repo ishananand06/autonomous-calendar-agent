@@ -1,7 +1,9 @@
 import os
+import asyncio
 import httpx
 from collections import deque
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from agent import process_whatsapp_message
 
@@ -55,7 +57,7 @@ async def verify_webhook(request: Request):
     if mode and token:
         if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN:
             print("Webhook verified successfully!")
-            return int(challenge)
+            return PlainTextResponse(content=challenge)
         else:
             raise HTTPException(status_code=403, detail="Verification token mismatch")
 
@@ -64,7 +66,6 @@ async def verify_webhook(request: Request):
 async def handle_message_background(sender: str, user_text: str, history: list):
     try:
         # 1. Get the AI's reply (this takes a few seconds)
-        import asyncio
         # We run the synchronous Gemini code in a thread so it doesn't block FastAPI
         reply_text, updated_history = await asyncio.to_thread(process_whatsapp_message, user_text, history)
         
@@ -127,6 +128,8 @@ async def _send_whatsapp_message(to: str, text: str) -> dict:
     }
     async with httpx.AsyncClient() as client:
         response = await client.post(WHATSAPP_API_URL, headers=headers, json=payload)
+        if response.status_code != 200:
+            print(f"WhatsApp API error {response.status_code}: {response.text}")
         response.raise_for_status()
         return response.json()
 

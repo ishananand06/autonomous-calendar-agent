@@ -1,8 +1,28 @@
 {
-  "daily_cognitive_limit_hours": 8,
-  "timezone": "Asia/Kolkata",
-  "habits": [
-    { "name": "LeetCode", "duration_minutes": 45, "frequency": "daily" }
-  ],
-  "projects": ["Project A", "Project B"]
+    "daily_cognitive_limit_hours": 8,
+    "timezone": "Asia/Kolkata",
+    "habits": [
+        {
+            "name": "LeetCode",
+            "duration_minutes": 45,
+            "frequency": "daily",
+            "context": "Practicing core problem-solving (e.g., Set Matrix Zeroes, Merge Intervals). Highly important for skill building, but can skip one day if absolutely slammed."
+        },
+        {
+            "name": "Gym / Rest",
+            "duration_minutes": 60,
+            "frequency": "daily",
+            "context": "Physical health and mental reset. Non-negotiable, strict requirement for sanity."
+        }
+    ],
+    "projects": [
+        {
+            "name": "Project A",
+            "context": "Context A"
+        },
+        {
+            "name": "Project B",
+            "context": "Context B"
+        }
+    ]
 }
