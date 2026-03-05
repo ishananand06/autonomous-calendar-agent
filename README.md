@@ -26,7 +26,7 @@ An opinionated, serverless scheduling assistant accessed via WhatsApp. Unlike st
    - Mac/Linux: `source .venv/bin/activate`
    - Windows: `.venv\Scripts\activate`
 5. Install dependencies: `pip install -r requirements.txt`
-6. Initialize your profile: `python setup.py`
+6. Initialize your profile: `python configure.py`
 7. Copy `.env.example` to `.env` and add your API credentials.
 8. Run the local server: `uvicorn main:app --reload`
 
@@ -61,3 +61,37 @@ To allow the AI to read and modify your schedule, you must connect it to your ow
 
 **SECURITY WARNING**
 Never share your `credentials.json` or `token.json` files, and **never commit them to version control**. Ensure your `.gitignore` file includes these filenames before running `git push`.
+
+## Setting up WhatsApp & Webhooks (Meta Cloud API)
+To interact with the agent via WhatsApp, you need to connect your local server to Meta's API using a secure public tunnel.
+
+**Step 1: Create a Public Tunnel with ngrok**
+1. Download and install [ngrok](https://ngrok.com/download).
+2. Authenticate your ngrok account in your terminal: `ngrok config add-authtoken YOUR_TOKEN`
+3. Open a separate terminal and start the tunnel on port 8000: `ngrok http 8000`
+4. Copy the `Forwarding` URL (e.g., `https://1a2b-34.ngrok-free.app`). *(Keep this terminal running).*
+
+**Step 2: Create a Meta Developer App**
+1. Go to the [Meta Developer Portal](https://developers.facebook.com/) and click **Create App**.
+2. Select **Other**, then **Business**. Name your app and create it.
+3. On the product setup page, scroll down to **WhatsApp** and click **Set Up**.
+4. If prompted, follow the instructions to create a free Meta Business Portfolio.
+
+**Step 3: Configure the Webhook**
+1. In the left menu under **WhatsApp**, click **Configuration**.
+2. Click **Edit** under the Webhook section.
+3. **Callback URL:** Paste your ngrok URL and append `/webhook` (e.g., `https://1a2b-34.ngrok-free.app/webhook`).
+4. **Verify Token:** Enter a custom password (e.g., `my_custom_secret_token_123`).
+5. Click **Verify and Save**. *(Note: Your local FastAPI server must be running for this to succeed).*
+6. Click **Manage** under Webhook fields, find the **messages** row, and click **Subscribe**.
+
+**Step 4: Update Environment Variables**
+1. Go to **WhatsApp > API Setup** to find your **Temporary access token** and **Phone number ID**.
+2. Get a free API key from [Google AI Studio](https://aistudio.google.com/).
+3. Open your `.env` file and update the values.
+4. Restart your `uvicorn` server to load the new environment variables.
+
+**Step 5: Talk to Your Agent**
+1. On the Meta **API Setup** page, add and verify your personal phone number in the **To** section.
+2. Add the provided **Test phone number** to your mobile device's contacts.
+3. Send a WhatsApp message to the test number to wake up the agent!

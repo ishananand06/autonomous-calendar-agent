@@ -165,7 +165,7 @@ def process_whatsapp_message(user_message: str, chat_history=None):
 
     # Rebuild the model so the system instruction reflects the current preferences
     model = genai.GenerativeModel(
-        model_name='gemini-2.0-flash',
+        model_name='gemini-3-flash-preview',
         system_instruction=get_system_prompt(prefs),
         tools=[check_calendar, create_event, update_preferences],
     )
@@ -184,6 +184,6 @@ def process_whatsapp_message(user_message: str, chat_history=None):
 
 if __name__ == "__main__":
     # Quick smoke-test — does not require a real calendar connection
-    msg = "I need to read a 4-hour research paper tomorrow."
+    msg = "I want to spend 9 hours on Audio Medusa today."
     reply, history = process_whatsapp_message(msg)
     print(f"Agent Reply: {reply}")

@@ -46,27 +46,50 @@ def authenticate_google_calendar():
 
 def get_upcoming_events(service, time_min=None, time_max=None):
     """
-    Retrieves events from the user's primary calendar within a specific timeframe.
-    This is the 'Context Tool' the LLM agent will use to check cognitive load.
-    Defaults to the next 7 days if no range is provided.
+    Retrieves events from ALL of the user's calendars within a specific timeframe.
     """
-    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     if time_min is None:
-        time_min = now.isoformat() + 'Z'
+        time_min = datetime.datetime.now(datetime.timezone.utc).isoformat()
     if time_max is None:
-        time_max = (now + datetime.timedelta(days=7)).isoformat() + 'Z'
+        time_max = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)).isoformat()
 
-    events_result = service.events().list(
-        calendarId='primary',
-        timeMin=time_min,
-        timeMax=time_max,
-        singleEvents=True,
-        orderBy='startTime'
-    ).execute()
+    all_events = []
 
-    events = events_result.get('items', [])
-    print(f"Retrieved {len(events)} events.")
-    return events
+    try:
+        # 1. Get the list of all calendars the user has access to
+        calendar_list = service.calendarList().list().execute()
+        calendars = calendar_list.get('items', [])
+
+        # 2. Loop through every single calendar
+        for calendar in calendars:
+            calendar_id = calendar['id']
+            try:
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                all_events.extend(events)
+            except Exception as e:
+                # Some shared/holiday calendars might block API reads, so we safely skip them
+                print(f"Skipping calendar {calendar.get('summary')} due to error: {e}")
+
+        # 3. Sort all combined events chronologically
+        def get_start_time(event):
+            # All-day events use 'date', timed events use 'dateTime'
+            return event.get('start', {}).get('dateTime', event.get('start', {}).get('date'))
+
+        all_events.sort(key=get_start_time)
+        print(f"Retrieved {len(all_events)} total events across {len(calendars)} calendars.")
+        return all_events
+
+    except Exception as error:
+        print(f"An error occurred fetching calendars: {error}")
+        return []
 
 def add_calendar_event(service, summary, start_time, end_time, timezone='UTC'):
     """
