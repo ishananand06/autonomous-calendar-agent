@@ -2,13 +2,16 @@ import os
 import json
 import datetime
 import zoneinfo
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
 from dotenv import load_dotenv
 from calendar_tools import authenticate_google_calendar, get_upcoming_events, add_calendar_event
-from google.api_core.exceptions import ResourceExhausted, TooManyRequests
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# Create the master client object
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 CONFIG_FILE = "user_config.json"
 
@@ -276,30 +279,38 @@ def process_whatsapp_message(user_message: str, chat_history=None):
         try:
             print(f"🧠 Attempting inference with {model_name}...")
             
-            model = genai.GenerativeModel(
-                model_name=model_name,
+            # 1. Package the prompt and tools into the new Config object
+            config = types.GenerateContentConfig(
                 system_instruction=get_system_prompt(prefs),
                 tools=[check_calendar, create_event, update_preferences],
             )
-            
-            chat = model.start_chat(
-                history=trimmed_history,
-                enable_automatic_function_calling=True,
+
+            # 2. Create the chat session using the new client
+            chat = client.chats.create(
+                model=model_name,
+                config=config,
+                history=trimmed_history
             )
             
+            # 3. Send the message
             response = chat.send_message(user_message)
-            return response.text, chat.history
             
-        except (ResourceExhausted, TooManyRequests):
-            # If this specific model is out of daily quota, loop to the next one
-            print(f"⚠️ {model_name} hit its rate limit (429). Cascading to next model...")
-            continue 
+            # Note: The new SDK uses .get_history() instead of .history
+            return response.text, chat.get_history()
             
-        except Exception as e:
-            # If it is a real crash (like a bad API key or server outage), stop immediately
-            print(f"❌ Unexpected API error with {model_name}: {e}")
-            return "I encountered an unexpected internal error. Please check the server logs.", chat_history
+        except APIError as e:
+            # The new SDK packages HTTP errors cleanly inside APIError
+            if e.code == 429:
+                print(f"⚠️ {model_name} hit its rate limit (429). Cascading to next model...")
+                continue 
+            else:
+                print(f"❌ Unexpected API error with {model_name}: {e}")
+                return "I encountered an unexpected internal error. Please check the server logs.", chat_history
 
+        except Exception as e:
+            print(f"❌ System error with {model_name}: {e}")
+            return "I encountered an unexpected internal error. Please check the server logs.", chat_history
+        
     # If the loop finishes, you have literally exhausted every model's free tier
     print("❌ All models in the fallback cascade are rate limited.")
     return "I am completely out of cognitive bandwidth for the day across all my models! Please try again later.", chat_history
