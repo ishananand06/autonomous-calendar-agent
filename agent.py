@@ -307,18 +307,23 @@ def process_whatsapp_message(user_message: str, chat_history=None):
             return response.text, chat.get_history()
             
         except APIError as e:
-            # The new SDK packages HTTP errors cleanly inside APIError
             if e.code == 429:
                 print(f"⚠️ {model_name} hit its rate limit (429). Cascading to next model...")
                 continue 
+            elif e.code == 400 and "function response" in str(e.message):
+                print(f"⚠️ History slicing error with {model_name}. Attempting to recover by dropping history...")
+                # If the history slice corrupted a function call, drop the history and answer the immediate prompt
+                try:
+                    chat = client.chats.create(model=model_name, config=config)
+                    response = chat.send_message(user_message)
+                    return response.text, chat.get_history()
+                except Exception as backup_e:
+                    print(f"❌ Recovery failed: {backup_e}")
+                    return "I am having trouble reading our past conversation. Could you repeat that?", []
             else:
                 print(f"❌ Unexpected API error with {model_name}: {e}")
                 return "I encountered an unexpected internal error. Please check the server logs.", chat_history
-
-        except Exception as e:
-            print(f"❌ System error with {model_name}: {e}")
-            return "I encountered an unexpected internal error. Please check the server logs.", chat_history
-        
+                
     # If the loop finishes, you have literally exhausted every model's free tier
     print("❌ All models in the fallback cascade are rate limited.")
     return "I am completely out of cognitive bandwidth for the day across all my models! Please try again later.", chat_history
