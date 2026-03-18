@@ -158,22 +158,30 @@ def create_event(summary: str, start_datetime: str, end_datetime: str) -> dict:
     event = add_calendar_event(service, summary, start_datetime, end_datetime, timezone=timezone)
     return {"event_id": event.get("id"), "html_link": event.get("htmlLink")}
 
-def update_preferences(key: str, value) -> dict:
+def update_preferences(key: str, value: str) -> dict:
     """
     Persists a change to the user's scheduling preferences.
     
     Supported keys:
     'daily_cognitive_limit_hours', 'timezone'
-    'habit_add' (value: dict with name, duration_minutes, frequency, context)
+    'habit_add' (value: JSON string with name, duration_minutes, frequency, context)
     'habit_remove:<name>', 'habit_context:<name>' (updates context string)
-    'project_add' (value: dict with name, context)
+    'project_add' (value: JSON string with name, context)
     'project_remove:<name>'
     'project_context:<name>' (updates the context string)
-    'deadline_add' (value: dict with task, due_date YYYY-MM-DD, hours_needed)
+    'deadline_add' (value: JSON string with task, due_date YYYY-MM-DD, hours_needed)
     'deadline_remove:<task>'
     'deadline_update_hours:<task>' (value: new float hours remaining)
     """
+    import json
     prefs = load_user_preferences()
+
+    # Convert JSON strings back to dictionaries for complex commands
+    if key in ["habit_add", "project_add", "deadline_add"]:
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {"error": "Value must be a valid JSON string for this key."}
 
     if key == "daily_cognitive_limit_hours":
         prefs["daily_cognitive_limit_hours"] = int(value)
